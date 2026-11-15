@@ -13,19 +13,10 @@ export default async function handler(req, res) {
     const { audioBase64 } = req.body;
     if (!audioBase64) throw new Error('Audio data missing');
 
-    // OpenRouter (Gemini 2.5 Flash) ဖြင့် Audio ကို နားထောင်ပြီး အချိန်ကိုက် မြန်မာပုံပြင်ပြော ဘာသာပြန်ခြင်း
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a professional Burmese movie recap narrator and viral thumbnail creator.
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Vercel တွင် GEMINI_API_KEY ထည့်ပေးရန် လိုအပ်ပါသည်');
+
+    const promptText = `You are a professional Burmese movie recap narrator and viral thumbnail creator.
 Listen to the provided movie audio, understand the entire plot, and create a time-synced Burmese storytelling narration (မြန်မာစကားပြောဟန်).
 Strict Rules:
 - Use ONLY Myanmar script for Burmese text (NO English words or phonetics).
@@ -35,41 +26,53 @@ Strict Rules:
   2. "title": Catchy Burmese title (max 30 chars, NO emojis/hashtags).
   3. "caption": One engaging curiosity-driven Burmese sentence ending with 1 emoji.
   4. "hashtags": Array of 5 Burmese story hashtags starting with # (no #fyp).
-  5. "thumbnailPrompt": Dramatic cinematic movie poster prompt in English (no text in image, emotional, 8k lighting).`
+  5. "thumbnailPrompt": Dramatic cinematic movie poster prompt in English (no text in image, emotional, 8k lighting).`;
+
+    // Google Gemini 2.5 Flash API (100% Free Audio Support)
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: promptText },
+                {
+                  inlineData: {
+                    mimeType: 'audio/mp3',
+                    data: audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
           },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Analyze this movie audio and generate the time-synced Burmese storytelling narration, metadata, and thumbnail prompt in JSON.'
-              },
-              {
-                type: 'input_audio',
-                input_audio: {
-                  data: audioBase64,
-                  format: 'mp3'
-                }
-              }
-            ]
-          }
-        ],
-        response_format: { type: 'json_object' }
-      })
-    });
+        }),
+      }
+    );
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || 'AI Audio Analysis Failed');
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'Gemini Audio Analysis Failed');
+    }
 
-    const content = data.choices[0].message.content.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(content);
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const cleanJson = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleanJson);
 
-    const encodedPrompt = encodeURIComponent(parsed.thumbnailPrompt + ', cinematic movie scene, dramatic lighting, ultra detailed, no text');
+    const encodedPrompt = encodeURIComponent(
+      (parsed.thumbnailPrompt || 'dramatic cinematic movie poster') +
+        ', cinematic movie scene, dramatic lighting, ultra detailed, no text'
+    );
     const thumbnailUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
 
     res.status(200).json({
       ...parsed,
-      thumbnailUrl
+      thumbnailUrl,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
