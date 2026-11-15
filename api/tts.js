@@ -5,11 +5,10 @@ export default async function handler(req, res) {
 
   try {
     const { text, voice } = req.body;
-    // my-MM-ThihaNeural (ယောက်ျားလေးအသံ) | my-MM-NilarNeural (မိန်းကလေးအသံ)
     const selectedVoice = voice || 'my-MM-ThihaNeural';
 
     const tts = new EdgeTTS(text, selectedVoice, {
-      rate: '+5%',
+      rate: '+10%',
       pitch: '+0Hz'
     });
 
@@ -19,6 +18,6 @@ export default async function handler(req, res) {
 
     res.status(200).json({ audioBase64: base64Audio });
   } catch (error) {
-    res.status(500).json({ error: 'TTS Generation Failed: ' + error.message });
+    res.status(500).json({ error: 'TTS Error: ' + error.message });
   }
 }
