@@ -13,67 +13,77 @@ export default async function handler(req, res) {
     const { audioBase64 } = req.body;
     if (!audioBase64) throw new Error('Audio data missing');
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Vercel တွင် GEMINI_API_KEY ထည့်ပေးရန် လိုအပ်ပါသည်');
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('Vercel တွင် OPENAI_API_KEY ထည့်ပေးရန် လိုအပ်ပါသည်');
 
-    const promptText = `You are a professional Burmese movie recap narrator and viral thumbnail creator.
-Listen to the provided movie audio, understand the entire plot, and create a time-synced Burmese storytelling narration (မြန်မာစကားပြောဟန်).
+    // ၁။ OpenAI Whisper ဖြင့် Audio မှ စာသားနှင့် အချိန်ကိုက် Timestamp ထုတ်ယူခြင်း
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    const formData = new FormData();
+    const audioBlob = new Blob([audioBuffer], { type: 'audio/mp3' });
+    formData.append('file', audioBlob, 'audio.mp3');
+    formData.append('model', 'whisper-1');
+    formData.append('response_format', 'verbose_json');
+
+    const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    const whisperData = await whisperRes.json();
+    if (!whisperRes.ok) {
+      throw new Error(whisperData.error?.message || 'Whisper Audio Transcription Failed');
+    }
+
+    // Timestamp ပါသော စာကြောင်းများ စုစည်းခြင်း
+    const timedLines = (whisperData.segments || [])
+      .map((s) => `[${s.start.toFixed(1)}s - ${s.end.toFixed(1)}s]: ${s.text}`)
+      .join('\n');
+
+    // ၂။ GPT-4o-mini ဖြင့် မြန်မာပုံပြင်ပြောဟန် ဘာသာပြန်ခြင်း
+    const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: `You are a professional Burmese movie recap narrator.
+Analyze the timestamped transcript and rewrite it into a cohesive, engaging spoken Burmese storytelling narration (မြန်မာစကားပြောဟန်).
 Strict Rules:
 - Use ONLY Myanmar script for Burmese text (NO English words or phonetics).
-- Break the narration into time-synced segments matching the video's pacing ("startSec" and "endSec" in seconds). Keep each Burmese segment concise so the voiceover finishes cleanly before the next segment starts.
+- Keep character names consistent throughout the story.
+- Group the narration into 4 to 8 natural time-synced segments matching the video pacing ("startSec" and "endSec" in seconds). Keep each Burmese segment concise so the voiceover finishes cleanly before the next segment starts.
 - Return STRICT JSON format with exact keys:
   1. "segments": Array of objects [{"startSec": 0, "endSec": 5, "burmeseText": "..."}, ...]
   2. "title": Catchy Burmese title (max 30 chars, NO emojis/hashtags).
   3. "caption": One engaging curiosity-driven Burmese sentence ending with 1 emoji.
-  4. "hashtags": Array of 5 Burmese story hashtags starting with # (no #fyp).
-  5. "thumbnailPrompt": Dramatic cinematic movie poster prompt in English (no text in image, emotional, 8k lighting).`;
-
-    // Updated to gemini-3.8-flash
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: promptText },
-                {
-                  inlineData: {
-                    mimeType: 'audio/mp3',
-                    data: audioBase64,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
+  4. "hashtags": Array of 5 Burmese story hashtags starting with # (no #fyp).`,
           },
-        }),
-      }
-    );
+          {
+            role: 'user',
+            content: `Timestamped Transcript:\n${timedLines || whisperData.text}`,
+          },
+        ],
+      }),
+    });
 
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Gemini Audio Analysis Failed');
+    const gptData = await gptRes.json();
+    if (!gptRes.ok) {
+      throw new Error(gptData.error?.message || 'GPT Translation Failed');
     }
 
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    const cleanJson = rawText.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(cleanJson);
+    const content = gptData.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
 
-    const encodedPrompt = encodeURIComponent(
-      (parsed.thumbnailPrompt || 'dramatic cinematic movie poster') +
-        ', cinematic movie scene, dramatic lighting, ultra detailed, no text'
-    );
-    const thumbnailUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1280&height=720&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
-
-    res.status(200).json({
-      ...parsed,
-      thumbnailUrl,
-    });
+    res.status(200).json(parsed);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
