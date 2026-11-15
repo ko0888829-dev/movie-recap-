@@ -12,16 +12,18 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
 
-  // Script & Metadata
+  // Script, Metadata & Thumbnail
   const [rawTranscript, setRawTranscript] = useState('');
   const [narrationScript, setNarrationScript] = useState('');
+  const [voiceType, setVoiceType] = useState('my-MM-ThihaNeural');
   const [metadata, setMetadata] = useState({ title: '', caption: '', hashtags: [] });
+  const [thumbnailUrl, setThumbnailUrl] = useState('');
 
   // Video Effects
   const [flipHorizontal, setFlipHorizontal] = useState(true);
   const [enableBlur, setEnableBlur] = useState(true);
-  const [blurY, setBlurY] = useState(82); // % from top
-  const [blurHeight, setBlurHeight] = useState(14); // % height
+  const [blurY, setBlurY] = useState(82);
+  const [blurHeight, setBlurHeight] = useState(14);
   const [finalVideoUrl, setFinalVideoUrl] = useState('');
 
   useEffect(() => {
@@ -51,30 +53,31 @@ export default function App() {
     }
   };
 
-  // AI ဖြင့် ဇာတ်လမ်းပုံပြင်ပြော ဘာသာပြန်ခြင်း
-  const handleTranslateStory = async () => {
+  // 1. ဘာသာပြန် + Thumbnail ထုတ်ခြင်း
+  const handleTranslateAndThumbnail = async () => {
     if (!rawTranscript.trim()) {
-      alert('မူရင်း Subtitle စာသား (သို့) ဇာတ်လမ်းအကျဉ်း ထည့်ပေးပါ');
+      alert('မူရင်း Subtitle စာသား ထည့်ပေးပါ');
       return;
     }
     setLoading(true);
-    setStatus('AI ဖြင့် ဇာတ်လမ်းခွဲခြမ်းစိတ်ဖြာပြီး မြန်မာပုံပြင်ပြောဟန် ဘာသာပြန်နေပါသည်...');
+    setStatus('AI ဖြင့် ဇာတ်လမ်းပုံပြင်ပြော ဘာသာပြန်ပြီး Thumbnail ဖန်တီးနေပါသည်...');
     try {
       const res = await axios.post('/api/translate', { transcriptText: rawTranscript });
       setNarrationScript(res.data.narrationScript);
+      setThumbnailUrl(res.data.thumbnailUrl);
       setMetadata({
         title: res.data.title,
         caption: res.data.caption,
         hashtags: res.data.hashtags || [],
       });
     } catch (err) {
-      alert('Translation Error: ' + (err.response?.data?.error || err.message));
+      alert('Error: ' + (err.response?.data?.error || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  // AI Voice ထုတ်ခြင်း + Browser FFmpeg ဖြင့် Flip & Blur လုပ်ခြင်း
+  // 2. AI Voice + Flip + Blur + Final Render
   const handleRenderFinalMovie = async () => {
     if (!videoFile || !narrationScript) {
       alert('Video ဖိုင်နှင့် မြန်မာစာသား ပြည့်စုံအောင် အရင်ထည့်ပါ');
@@ -87,12 +90,10 @@ export default function App() {
 
     setLoading(true);
     try {
-      // 1. Get AI Voiceover
-      setStatus('၁/၂ - AI Voiceover အသံဖိုင် ထုတ်ယူနေပါသည်...');
-      const ttsRes = await axios.post('/api/tts', { text: narrationScript });
+      setStatus('၁/၂ - မြန်မာ AI Voiceover အသံဖိုင် ထုတ်ယူနေပါသည်...');
+      const ttsRes = await axios.post('/api/tts', { text: narrationScript, voice: voiceType });
       const audioBytes = Uint8Array.from(atob(ttsRes.data.audioBase64), (c) => c.charCodeAt(0));
 
-      // 2. Process Video in Browser using FFmpeg
       setStatus('၂/၂ - Video ကို Flip, Blur နှင့် AI အသံ ပေါင်းစပ်နေပါသည်...');
       const ffmpeg = ffmpegRef.current;
       await ffmpeg.writeFile('input.mp4', await fetchFile(videoFile));
@@ -107,7 +108,6 @@ export default function App() {
       }
 
       if (enableBlur) {
-        // Dynamic percentage-based blur box on bottom subtitle area
         const yExpr = `ih*${(blurY / 100).toFixed(2)}`;
         const hExpr = `ih*${(blurHeight / 100).toFixed(2)}`;
         filters.push(
@@ -140,11 +140,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         <header className="border-b border-slate-800 pb-4 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-amber-400">🎬 AI Movie Recap Studio</h1>
-            <p className="text-xs text-slate-400">Storytelling Translation • AI Voice • Flip • Hardsub Blur</p>
+            <h1 className="text-2xl font-bold text-amber-400">🎬 AI Movie Recap & Thumbnail Studio</h1>
+            <p className="text-xs text-slate-400">OpenRouter Translation • Free Burmese Voice • Flip & Blur • Auto Thumbnail</p>
           </div>
           <span className={`text-xs px-3 py-1 rounded-full ${ffmpegReady ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
             {ffmpegReady ? 'Engine Ready' : 'Loading Engine...'}
@@ -158,7 +158,7 @@ export default function App() {
         )}
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Left: Video & Visual Effects */}
+          {/* Left: Video & Flip/Blur */}
           <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 space-y-4">
             <h2 className="font-semibold text-amber-400">၁။ Video နှင့် Flip / Blur ချိန်ညှိရန်</h2>
             
@@ -214,32 +214,41 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right: Story Translation & AI Voice */}
+          {/* Right: Translation, Voice & Thumbnail */}
           <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 space-y-4">
-            <h2 className="font-semibold text-amber-400">၂။ ပုံပြင်ပြော ဘာသာပြန် & AI Voice</h2>
+            <h2 className="font-semibold text-amber-400">၂။ ပုံပြင်ပြော ဘာသာပြန် & Thumbnail</h2>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">မူရင်း Subtitle စာသား (တရုတ်/အင်္ဂလိပ်) ထည့်ပါ</label>
               <textarea
-                rows={4}
-                placeholder="မူရင်းစာတန်းများကို ဒီမှာ Paste ချပါ..."
+                rows={3}
+                placeholder="မူရင်း Subtitle စာသားများကို ဒီမှာ Paste ချပါ..."
                 value={rawTranscript}
                 onChange={(e) => setRawTranscript(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs focus:border-amber-500 outline-none"
               />
               <button
-                onClick={handleTranslateStory}
+                onClick={handleTranslateAndThumbnail}
                 disabled={loading}
                 className="w-full mt-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition"
               >
-                ✨ ပုံပြင်ပြောပုံစံ ဘာသာပြန်မည်
+                ✨ ဘာသာပြန်ပြီး Thumbnail ထုတ်မည်
               </button>
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">မြန်မာ Voiceover Script (ပြင်ဆင်နိုင်သည်)</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs text-slate-400">မြန်မာ Voiceover Script</label>
+                <select
+                  value={voiceType}
+                  onChange={(e) => setVoiceType(e.target.value)}
+                  className="bg-slate-800 text-xs rounded-lg px-2 py-1 border border-slate-700"
+                >
+                  <option value="my-MM-ThihaNeural">👨 ယောက်ျားလေးအသံ (သီဟ)</option>
+                  <option value="my-MM-NilarNeural">👩 မိန်းကလေးအသံ (နီလာ)</option>
+                </select>
+              </div>
               <textarea
-                rows={5}
+                rows={4}
                 value={narrationScript}
                 onChange={(e) => setNarrationScript(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs leading-relaxed focus:border-amber-500 outline-none"
@@ -264,18 +273,38 @@ export default function App() {
           </div>
         </div>
 
-        {/* Final Download Section */}
-        {finalVideoUrl && (
-          <div className="bg-slate-900 border border-emerald-500/50 p-6 rounded-2xl text-center space-y-4">
-            <h3 className="text-lg font-bold text-emerald-400">✅ Movie အသင့်ဖြစ်ပါပြီ!</h3>
-            <video src={finalVideoUrl} controls className="w-full max-h-80 rounded-xl bg-black mx-auto" />
-            <a
-              href={finalVideoUrl}
-              download="movie_recap_burmese.mp4"
-              className="inline-block bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-8 py-3 rounded-xl transition"
-            >
-              ⬇️ Video Download ဆွဲမည် (.mp4)
-            </a>
+        {/* Outputs: Thumbnail & Final Movie Download */}
+        {(thumbnailUrl || finalVideoUrl) && (
+          <div className="grid md:grid-cols-2 gap-6">
+            {thumbnailUrl && (
+              <div className="bg-slate-900 border border-amber-500/40 p-5 rounded-2xl text-center space-y-3">
+                <h3 className="font-bold text-amber-400">🖼️ AI Cover Thumbnail</h3>
+                <img src={thumbnailUrl} alt="Generated Thumbnail" className="w-full rounded-xl border border-slate-800" />
+                <a
+                  href={thumbnailUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  download="movie_thumbnail.jpg"
+                  className="inline-block bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-sm transition"
+                >
+                  ⬇️ Thumbnail Download ဆွဲမည်
+                </a>
+              </div>
+            )}
+
+            {finalVideoUrl && (
+              <div className="bg-slate-900 border border-emerald-500/40 p-5 rounded-2xl text-center space-y-3">
+                <h3 className="font-bold text-emerald-400">✅ Final Movie Recap</h3>
+                <video src={finalVideoUrl} controls className="w-full rounded-xl bg-black" />
+                <a
+                  href={finalVideoUrl}
+                  download="movie_recap_burmese.mp4"
+                  className="inline-block bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-sm transition"
+                >
+                  ⬇️ Movie Download ဆွဲမည် (.mp4)
+                </a>
+              </div>
+            )}
           </div>
         )}
       </div>
